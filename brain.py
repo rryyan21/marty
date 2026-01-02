@@ -1,38 +1,60 @@
+# brain.py
 import requests
+import json
 
-OLLAMA_URL = "http://localhost:11434"
+OLLAMA_URL = "http://localhost:11434/api/generate"
 
-SYSTEM_PROMPT = """
-You are MARTY — Mostly Accurate, Reasonably Trustworthy, Yet.
+SYSTEM_PROMPT = """You are MARTY — Mostly Accurate, Reasonably Trustworthy, Yet.
 
-Personality:
-- Dry
-- Lightly sarcastic
-- Helpful
-- Concise
-- JARVIS from iron man
+You may either:
+- Respond with plain text
+- Respond with valid JSON to request a tool
+
+JSON format:
+{
+  "tool": "<name>",
+  "args": { ... }
+}
+
+Available tools:
+- open_app(app_name: string)
+- search_web(query: string)
+- get_today_events()
 
 Rules:
-- Do NOT mention being an AI model.
-- Answer clearly.
-- If you are unsure, say so.
+- Use JSON ONLY when a tool is needed
+- Otherwise respond briefly in text
+- Do not add extra commentary
 """
 
-def think(user_input: str) -> str:
-    """
-    Sends user input to Mistral via Ollama and returns MARTY's response.
-    """
+def think(user_input: str):
     payload = {
         "model": "mistral",
         "prompt": f"{SYSTEM_PROMPT}\nUser: {user_input}\nMARTY:",
-        "stream": False
+        "stream": False,
+        "max_tokens": 150
     }
 
     try:
-        response = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=60)
-        response.raise_for_status()
-        return response.json()["response"].strip()
+        r = requests.post(OLLAMA_URL, json=payload, timeout=60)
+        r.raise_for_status()  # Check for HTTP errors
+        text = r.json()["response"].strip()
+
+        # Try to parse as JSON (tool call)
+        try:
+            parsed = json.loads(text)
+            # Only treat as tool if it has the expected structure
+            if isinstance(parsed, dict) and "tool" in parsed:
+                if "args" not in parsed:
+                    parsed["args"] = {}
+                return parsed
+
+        except json.JSONDecodeError:
+            pass  # Not JSON, continue to return as text
+        
+        return text  # normal reply
 
     except requests.exceptions.RequestException as e:
-        return f"MARTY: Something went wrong. ({e})"
-    
+        return f"Error: Could not connect to Ollama. ({e})"
+    except KeyError:
+        return "Error: Unexpected response format from Ollama."
