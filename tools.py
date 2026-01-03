@@ -17,10 +17,14 @@ def search_web(query: str):
     webbrowser.open(f"https://www.google.com/search?q={query}")
 
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
-def get_today_events():
+def get_calendar_service():
+    """
+    Returns an authenticated Google Calendar service.
+    Handles OAuth flow and token refresh automatically.
+    """
     creds = None
 
     if os.path.exists("token.json"):
@@ -32,6 +36,8 @@ def get_today_events():
 
     # 1️⃣ No credentials at all → OAuth once
     if not creds:
+        if not os.path.exists("credentials.json"):
+            raise FileNotFoundError("credentials.json not found. Please set up Google Calendar API credentials.")
         flow = InstalledAppFlow.from_client_secrets_file(
             "credentials.json", SCOPES
         )
@@ -45,8 +51,12 @@ def get_today_events():
     with open("token.json", "w") as token:
         token.write(creds.to_json())
 
+    return build("calendar", "v3", credentials=creds)
+
+
+def get_today_events():
     try:
-        service = build("calendar", "v3", credentials=creds)
+        service = get_calendar_service()
 
         now = datetime.utcnow().isoformat() + "Z"
         end = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
@@ -90,3 +100,78 @@ def get_today_events():
         
     except Exception as e:
         return f"Error fetching calendar events: {e}"
+
+
+def get_calendar_events_range(start_time: datetime, end_time: datetime):
+    """
+    Fetches all calendar events between start_time and end_time.
+    Returns a list of event dictionaries with start/end times.
+    """
+    try:
+        service = get_calendar_service()
+        
+        time_min = start_time.isoformat() + "Z"
+        time_max = end_time.isoformat() + "Z"
+        
+        events_result = service.events().list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime"
+        ).execute()
+        
+        return events_result.get("items", [])
+    
+    except Exception as e:
+        raise Exception(f"Error fetching calendar events: {e}")
+
+
+def insert_calendar_event(summary: str, start_time: datetime, end_time: datetime, description: str = ""):
+    """
+    Safely inserts a single calendar event.
+    Only uses events().insert - never modifies or deletes existing events.
+    """
+    try:
+        service = get_calendar_service()
+        
+        event = {
+            "summary": summary,
+            "description": description,
+            "start": {
+                "dateTime": start_time.isoformat(),
+                "timeZone": "America/Los_Angeles",  # TODO: make configurable
+            },
+            "end": {
+                "dateTime": end_time.isoformat(),
+                "timeZone": "America/Los_Angeles",
+            },
+        }
+        
+        created_event = service.events().insert(
+            calendarId="primary",
+            body=event
+        ).execute()
+        
+        return created_event.get("id")
+    
+    except Exception as e:
+        raise Exception(f"Error inserting calendar event: {e}")
+
+
+def add_calendar_event(start_dt, end_dt, title, description=""):
+    """
+    Simple wrapper to add a calendar event.
+    Accepts Python datetime objects and converts them to RFC3339 format.
+    Returns success message or error string.
+    """
+    try:
+        event_id = insert_calendar_event(
+            summary=title,
+            start_time=start_dt,
+            end_time=end_dt,
+            description=description
+        )
+        return f"Success: Added event '{title}'"
+    except Exception as e:
+        return f"Error: {str(e)}"

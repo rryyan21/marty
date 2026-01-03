@@ -21,6 +21,7 @@ Available tools:
 - search_web(query: string)
 - get_today_events()
 
+
 Rules:
 - Use JSON ONLY when a tool is needed
 - Otherwise respond briefly in text
@@ -58,3 +59,41 @@ def think(user_input: str):
         return f"Error: Could not connect to Ollama. ({e})"
     except KeyError:
         return "Error: Unexpected response format from Ollama."
+
+
+def classify_confirmation(text: str) -> str:
+    """
+    Classifies user text as CONFIRM, DECLINE, or UNKNOWN.
+    Returns strict JSON only, never calls tools.
+    """
+    prompt = f"""Classify this user response as one of: CONFIRM, DECLINE, UNKNOWN.
+
+User response: "{text}"
+
+Respond with ONLY one word: CONFIRM, DECLINE, or UNKNOWN.
+No explanation, no JSON, just the word."""
+
+    payload = {
+        "model": "mistral",
+        "prompt": prompt,
+        "stream": False,
+        "max_tokens": 10
+    }
+
+    try:
+        r = requests.post(OLLAMA_URL, json=payload, timeout=60)
+        r.raise_for_status()
+        response = r.json()["response"].strip().upper()
+        
+        # Extract the classification from response
+        if "CONFIRM" in response:
+            return "CONFIRM"
+        elif "DECLINE" in response or "NO" in response:
+            return "DECLINE"
+        else:
+            return "UNKNOWN"
+    
+    except requests.exceptions.RequestException:
+        return "UNKNOWN"
+    except (KeyError, ValueError):
+        return "UNKNOWN"
